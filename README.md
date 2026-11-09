@@ -4,15 +4,13 @@ Finetunes the Octo generalist robot policy to predict an action covariance. That
 
 Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), with Michael Przystupa and Matthew E. Taylor, University of Alberta.
 
-![demo](docs/demo.gif)
-<!--
-Record ~15s of terminal, then the plot it produces:
-  1. python scripts/teleoperationUnitTest.py           (prints mean/cov shapes)
-  2. python scripts/visualize_trajectories.py --results_dir=./results/multi_horizon \
-       --output_dir=./results/multi_horizon/plots --max_trajectories=1 --show_plots=true
-  End on one predicted-vs-ground-truth trajectory plot.
-  If you'd rather not record anything, swap this line for docs/recon_heatmap.png.
--->
+<p>
+  <img src="docs/media/bridge_episode_stove.gif" width="200">
+  <img src="docs/media/bridge_episode_table.gif" width="200">
+  <img src="docs/media/bridge_episode_counter.gif" width="200">
+</p>
+
+<sub>Bridge episodes from Octo's example data, which I used to sanity-check the pretrained model before replacing its action head.</sub>
 
 ## Why I built this
 
@@ -58,6 +56,12 @@ There are no env vars. Everything is set with absl flags.
 
 ## How it works
 
+Out of the box, Octo predicts the next action directly. Here's the pretrained model zero-shot on a Bridge episode (blue: predicted, orange: ground truth):
+
+![pretrained Octo zero-shot on Bridge](docs/media/octo_zeroshot_bridge_stove.jpg)
+
+I keep the transformer and replace that output:
+
 ```mermaid
 flowchart LR
   A[image + proprio + instruction] --> B[pretrained Octo transformer]
@@ -70,6 +74,10 @@ flowchart LR
 
 Octo's tokenizers and transformer stay as they are. Only the output head changes. The head predicts a zero-mean Gaussian over actions. Training minimizes the negative log-likelihood of the expert action chunk under `N(0, Σ)`. The top-k eigenvectors of Σ, scaled by √λ, become the joystick-to-robot mapping. The eigenvectors set the directions and the eigenvalues set the gains.
 
+<img src="docs/media/teleop_finetune_loss.jpg" width="480" alt="teleop head finetuning loss">
+
+<sub>NLL during a 1000-step finetune of the head on ALOHA sim (`teleop_finetune.py`).</sub>
+
 ## The hard part
 
 **Predicting a control mapping instead of an action, and then showing it works.**
@@ -77,6 +85,10 @@ Octo's tokenizers and transformer stay as they are. Only the output head changes
 *Parameterization.* The first version predicted a separate Σ for every step in the chunk. That's H × 105 outputs for 14-dim actions, or 5,250 at horizon 50, and it gives you a mapping that keeps shifting under the user's hand. In `03c4c8c` I switched to one Cholesky factor per timestep, shared across the horizon. That's 105 outputs, and `L·Lᵀ + εI` keeps Σ positive-definite without optimizer constraints. The tradeoff: the model can't express uncertainty that grows later in the chunk. In return the operator gets a mapping that holds steady.
 
 *Evaluation.* With a zero mean there's no prediction to score, so MSE tells you nothing. `multi_horizon_predict.py` draws 128 samples per timestep, builds the rank-2 basis B from their covariance, and solves `min_z ‖a* − Bz‖²` for each expert action. Reconstruction error answers one question: could a 2-DOF joystick have produced the action the expert took?
+
+<img src="docs/media/traj_train_h5_pred_h5_segment3.jpg" width="360" alt="sampled actions vs ground truth">
+
+<sub>Samples from the head (orange) scatter around zero by design, so they don't track the ground truth (blue). That's why scoring them with MSE doesn't work. First 7 of 14 action dims, train/predict horizon 5.</sub>
 
 Result: on held-out trajectories, training at horizon 5 gave the best mapping at every evaluation horizon (MSE 0.113 at horizon 15). That's about 3× lower than training at horizon 1 or 15. Horizon 1 doesn't capture the task's temporal structure, and horizon 15 overfits.
 
