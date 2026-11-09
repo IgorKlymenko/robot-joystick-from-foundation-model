@@ -39,7 +39,7 @@ pip install --upgrade "jax[cuda12_pip]==0.4.20" -f https://storage.googleapis.co
 pip install scipy==1.11.4 "numpy<2" nvidia-cudnn-cu12==8.9.4.25
 
 # smoke test the head (no data needed)
-python scripts/teleoperationUnitTest.py
+python scripts/smoke_test_teleop_head.py
 
 # simulated ALOHA cube-handover data -> data/aloha_sim_dataset
 wget -P data/ https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip
