@@ -1,4 +1,4 @@
-# octo_teleoperation
+# Video Language Teleoperation Models
 
 Finetunes the Octo generalist robot policy to predict an action covariance. That covariance becomes a mapping from a 2-DOF joystick to a 14-dim bimanual robot (ALOHA). It's research code for assistive teleoperation.
 
