@@ -7,7 +7,7 @@ This script runs the complete experiment pipeline:
 """
 
 
-### TEST CODE -- REFER TO COLLAB NOTEBOOK FOR ACTUAL CODE I USED ###
+### TEST CODE -- the report experiments were run from the Colab notebook in notebooks/ ###
 from absl import app, flags, logging
 import subprocess
 import sys

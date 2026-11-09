@@ -1,168 +1,97 @@
-# Octo
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/octo-models/octo/blob/main/examples/01_inference_pretrained.ipynb)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://octo-models.github.io/)
-![](https://github.com/rail-berkeley/octo/workflows/run-debug/badge.svg)
-![](https://github.com/rail-berkeley/octo/workflows/pre-commit/badge.svg)
+# octo_teleoperation
 
-This repo contains code for training and finetuning Octo generalist robotic policies (GRPs).
-Octo models are transformer-based diffusion policies, trained on a diverse mix of 800k robot trajectories.
+Finetunes the Octo generalist robot policy to predict an action covariance. That covariance becomes a mapping from a 2-DOF joystick to a 14-DOF arm. It's research code for assistive teleoperation.
 
-## Get Started
+Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), with Michael Przystupa and Matthew E. Taylor, University of Alberta.
 
-Follow the installation instructions, then load a pretrained Octo model! See [examples](examples/) for guides to zero-shot evaluation and finetuning and [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1z0vELj_lX9OWeoMG_WvXnQs43aPOEAhz?usp=sharing)
-for an inference example.
+![demo](docs/demo.gif)
+<!--
+Record ~15s of terminal, then the plot it produces:
+  1. python scripts/teleoperationUnitTest.py           (prints mean/cov shapes)
+  2. python scripts/visualize_trajectories.py --results_dir=./results/multi_horizon \
+       --output_dir=./results/multi_horizon/plots --max_trajectories=1 --show_plots=true
+  End on one predicted-vs-ground-truth trajectory plot.
+  If you'd rather not record anything, swap this line for docs/recon_heatmap.png.
+-->
 
-```python
-from octo.model.octo_model import OctoModel
-model = OctoModel.load_pretrained("hf://rail-berkeley/octo-base-1.5")
-print(model.get_pretty_spec())
-```
+## Why I built this
 
-![Octo model](docs/assets/teaser.jpg)
+Assistive teleoperation maps a 2D or 3D joystick onto a high-DOF robot. Existing systems learn that mapping per task, and collecting data for each task is expensive. I wanted to check whether a pretrained generalist policy could produce the mapping once from the scene and the instruction, so the controller doesn't need task-specific action labels.
 
-Out of the box, Octo supports multiple RGB camera inputs, can control various robot arms,
-and can be instructed via language commands or goal images.
-Octo uses a modular attention structure in its transformer backbone, allowing it to be effectively finetuned
-to robot setups with new sensory inputs, action spaces, and morphologies, using only a small target domain
-dataset and accessible compute budgets.
+## What I changed vs. upstream
 
+This is a fork of [Octo](https://github.com/octo-models/octo). Everything not listed here is upstream code (original README in `README.upstream.md`).
 
-## Installation
+- `octo/model/components/action_heads.py`: `TeleoperationActionHead` (the last ~290 lines)
+- `scripts/teleop_finetune.py`: replaces the action head on a pretrained Octo model and finetunes it
+- `scripts/multi_horizon_finetune.py`, `multi_horizon_predict.py`, `run_multi_horizon_experiment.py`: train at several action horizons and cross-evaluate every train/predict pair
+- `scripts/visualize_trajectories.py`: predicted-vs-ground-truth plots
+- `notebooks/`: the Colab notebook that produced the report's results
+- `scripts/MULTI_HORIZON_README.md`: full flag reference
+
+## Run it locally
+
+Python 3.10. Training needs a GPU.
+
 ```bash
-conda create -n octo python=3.10
-conda activate octo
+conda create -n octo python=3.10 && conda activate octo
 pip install -e .
 pip install -r requirements.txt
-```
-For GPU:
-```bash
 pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# smoke test the head (no data needed)
+python scripts/teleoperationUnitTest.py
+
+# simulated ALOHA cube-handover data
+wget https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip && unzip example_sim_data.zip
+
+# finetune at horizons 1/5/15, then evaluate all 9 pairs (settings from the report)
+python scripts/run_multi_horizon_experiment.py \
+  --pretrained_path=hf://rail-berkeley/octo-small-1.5 \
+  --data_dir=./example_sim_data \
+  --base_save_dir=./checkpoints/multi_horizon \
+  --output_dir=./results/multi_horizon \
+  --action_horizons=1,5,15 --num_steps=2000 --num_trajectories=3
 ```
 
-For TPU
-```bash
-pip install --upgrade "jax[tpu]==0.4.20" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-```
-See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
+There are no env vars. Everything is set with absl flags.
 
-Test the installation by finetuning on the debug dataset:
-```bash
-python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small-1.5 --debug
-```
+## How it works
 
-## Checkpoints
-
-You can find pretrained Octo checkpoints [here](https://huggingface.co/rail-berkeley).
-At the moment we provide the following model versions:
-
-| Model                                                         | Inference on 1x NVIDIA 4090 | Size       |
-|---------------------------------------------------------------|-----------------------------|------------|
-| [Octo-Base](https://huggingface.co/rail-berkeley/octo-base)   | 13 it/sec                   | 93M Params |
-| [Octo-Small](https://huggingface.co/rail-berkeley/octo-small) | 17 it/sec                   | 27M Params |
-
-
-## Examples
-
-We provide simple [example scripts](examples) that demonstrate how to use and finetune Octo models,
-as well as how to use our data loader independently. We provide the following examples:
-
-|                                                                      |                                                                                                                    |
-|----------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| [Octo Inference](examples/01_inference_pretrained.ipynb)             | Minimal example for loading and running a pretrained Octo model                                                    |
-| [Octo Finetuning](examples/02_finetune_new_observation_action.py)    | Minimal example for finetuning a pretrained Octo models on a small dataset with a new observation and action space |
-| [Octo Rollout](examples/03_eval_finetuned.py)                        | Run a rollout of a pretrained Octo policy in a Gym environment                                                     |
-| [Octo Robot Eval](examples/04_eval_finetuned_on_robot.py)            | Evaluate a pretrained Octo model on a real WidowX robot                                                            |
-| [OpenX Dataloader Intro](examples/05_dataloading.ipynb)              | Walkthrough of the features of our Open X-Embodiment data loader                                                   |
-| [OpenX PyTorch Dataloader](examples/06_pytorch_oxe_dataloader.ipynb) | Standalone Open X-Embodiment data loader in PyTorch                                                                |
-
-
-## Octo Pretraining
-
-To reproduce our Octo pretraining on 800k robot trajectories, run:
-```bash
-python scripts/train.py --config scripts/configs/octo_pretrain_config.py:<size> --name=octo --config.dataset_kwargs.oxe_kwargs.data_dir=... --config.dataset_kwargs.oxe_kwargs.data_mix=oxe_magic_soup ...
+```mermaid
+flowchart LR
+  A[image + proprio + instruction] --> B[pretrained Octo transformer]
+  B --> C[MAP pooling over readout tokens]
+  C --> D["Dense → lower-triangular L"]
+  D --> E["Σ = L·Lᵀ + εI"]
+  E --> F["top-k eigenvectors: W = U_k·Λ_k^½ (14×2)"]
+  F --> G["robot action = W · joystick input"]
 ```
 
-To download the pretraining dataset from the [Open X-Embodiment Dataset](https://robotics-transformer-x.github.io/),
-install the [rlds_dataset_mod package](https://github.com/kpertsch/rlds_dataset_mod)
-and run the [prepare_open_x.sh script](https://github.com/kpertsch/rlds_dataset_mod/blob/main/prepare_open_x.sh).
-The total size of the pre-processed dataset is ~1.2TB.
+Octo's tokenizers and transformer stay as they are. Only the output head changes. The head predicts a zero-mean Gaussian over actions. Training minimizes the negative log-likelihood of the expert action chunk under `N(0, Σ)`. The top-k eigenvectors of Σ, scaled by √λ, become the joystick-to-robot mapping. The eigenvectors set the directions and the eigenvalues set the gains.
 
-We run pretraining using a TPUv4-128 pod in 8 hours for the Octo-S model and in 14 hours for Octo-B.
+## The hard part
 
+**Predicting a control mapping instead of an action, and then showing it works.**
 
-## Octo Finetuning
+*Parameterization.* The first version predicted a separate Σ for every step in the chunk. That's H × 105 outputs for 14-dim actions, or 5,250 at horizon 50, and it gives you a mapping that keeps shifting under the user's hand. In `03c4c8c` I switched to one Cholesky factor per timestep, shared across the horizon. That's 105 outputs, and `L·Lᵀ + εI` keeps Σ positive-definite without optimizer constraints. The tradeoff: the model can't express uncertainty that grows later in the chunk. In return the operator gets a mapping that holds steady.
 
-We provide a [minimal example](examples/02_finetune_new_observation_action.py) for finetuning with a new observation and action space.
+*Evaluation.* With a zero mean there's no prediction to score, so MSE tells you nothing. `multi_horizon_predict.py` draws 128 samples per timestep, builds the rank-2 basis B from their covariance, and solves `min_z ‖a* − Bz‖²` for each expert action. Reconstruction error answers one question: could a 2-DOF joystick have produced the action the expert took?
 
-We also provide a more advanced finetuning script that allows you to change hyperparameters via a config file and logs finetuning
-metrics. To run advanced finetuning, use:
-```bash
-python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small-1.5
-```
+Result: on held-out trajectories, training at horizon 5 gave the best mapping at every evaluation horizon (MSE 0.113 at horizon 15). That's about 3× lower than training at horizon 1 or 15. Horizon 1 doesn't capture the task's temporal structure, and horizon 15 overfits.
 
-We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only```, and ```full``` to finetune the full model.
-Additionally, one can specify the task type to finetune with: ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both.
-For example, to finetune the full transformer with image inputs only use:
-```--config=finetune_config.py:full,image_conditioned```.
+![reconstruction error](docs/recon_heatmap.png)
 
+## Stack
 
-## Octo Evaluation
+Python, JAX/Flax, TensorFlow Probability (JAX substrate), Optax, TF/RLDS data pipeline (from Octo), matplotlib.
 
-Loading and running a trained Octo model is as easy as:
-```python
-from octo.model import OctoModel
+## Status
 
-model = OctoModel.load_pretrained("hf://rail-berkeley/octo-small-1.5")
-task = model.create_tasks(texts=["pick up the spoon"])
-action = model.sample_actions(observation, task, rng=jax.random.PRNGKey(0))
-```
+- Simulation only (ALOHA sim). No user study or real-robot run yet. That's the next step in the report.
+- The report's numbers come from the notebook in `notebooks/`. The scripts are the cleaned-up version and haven't been re-run end to end.
+- `teleop_finetune.py` hardcodes the dataset and step count. Use the multi-horizon scripts instead.
 
-We provide examples for evaluating Octo [in a simulated Gym environment](examples/03_eval_finetuned.py) as well
-as [on a real WidowX robot](examples/04_eval_finetuned_on_robot.py).
+## License
 
-To evaluate on your own environment, simply wrap it in a Gym interface and follow the instructions in the
-[Eval Env README](examples/envs/README.md).
-
-
-## Code Structure
-
-|                     | File                                                    | Description                                                                   |
-|---------------------|---------------------------------------------------------|-------------------------------------------------------------------------------|
-| Hyperparameters     | [config.py](scripts/configs/config.py)                  | Defines all hyperparameters for the training run.                             |
-| Pretraining Loop    | [train.py](scripts/train.py)                            | Main pretraining script.                                                         |
-| Finetuning Loop     | [finetune.py](scripts/finetune.py)                      | Main finetuning script.                                                       |
-| Datasets            | [dataset.py](octo/data/dataset.py)                      | Functions for creating single / interleaved datasets + data augmentation.     |
-| Tokenizers          | [tokenizers.py](octo/model/components/tokenizers.py)    | Tokenizers that encode image / text inputs into tokens.                       |
-| Octo Model          | [octo_model.py](octo/model/octo_model.py)               | Main entry point for interacting with Octo models: loading, saving, and inference. |
-| Model Architecture  | [octo_module.py](octo/model/octo_module.py)             | Combines token sequencing, transformer backbone and readout heads.            |
-| Visualization       | [visualization_lib.py](octo/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                        |
-
-## FAQ
-#### What is the `timestep_pad_mask` in the observation dictionary?
-The `timestep_pad_mask` indicates which observations should be attended to, which is important when using multiple timesteps of observation history. Octo was trained with a history window size of 2, meaning the model can predict an action using both the current observation and the previous observation. However, at the very beginning of the trajectory, there is no previous observation, so we need to set `timestep_pad_mask=False` at the corresponding index. If you use Octo with a window size of 1, `timestep_pad_mask` should always just be `[True]`, indicating that the one and only observation in the window should be attended to. Note that if you wrap your robot environment with the `HistoryWrapper` (see [gym_wrappers.py](octo/utils/gym_wrappers.py)), the `timestep_pad_mask` key will be added to the observation dictionary for you.
-#### What is `pad_mask_dict` in the observation dictionary?
-While `timestep_pad_mask` indicates which observations should be attended to on a timestep level, `pad_mask_dict` indicates which elements of the observation should be attended to within a single timestep. For example, for datasets without language labels, `pad_mask_dict["language_instruction"]` is set to `False`. For datasets without a wrist camera, `pad_mask_dict["image_wrist"]` is set to `False`. For convenience, if a key is missing from the observation dict, it is equivalent to setting `pad_mask_dict` to `False` for that key.
-#### Does `model.sample_actions([...])` return the full trajectory to solve a task?
-Octo was pretrained with an action chunking size of 4, meaning it predicts the next 4 actions at once. You can choose to execute all these actions before sampling new ones, or only execute the first action before sampling new ones (also known as receding horizon control). You can also do something more advanced like [temporal ensembling](octo/utils/gym_wrappers.py).
-
-## Updates for Version 1.5
-- Improved cross-attention between visual and language tokens by repeating language tokens at every timestep in the context window.
-- Augmented the language instructions in the data with rephrasings from GPT-3.5.
-- Bug fixes:
-  - Turned off dropout in the diffusion head due to incompatibility with layer norm.
-  - Fixed an off-by-one error with the attention mask.
-  - Fixed an issue where different image augmentations did not get fresh random seeds.
-
-## Citation
-
-```
-@inproceedings{octo_2023,
-    title={Octo: An Open-Source Generalist Robot Policy},
-    author = {{Octo Model Team} and Dibya Ghosh and Homer Walke and Karl Pertsch and Kevin Black and Oier Mees and Sudeep Dasari and Joey Hejna and Charles Xu and Jianlan Luo and Tobias Kreiman and {You Liang} Tan and Pannag Sanketi and Quan Vuong and Ted Xiao and Dorsa Sadigh and Chelsea Finn and Sergey Levine},
-    booktitle = {Proceedings of Robotics: Science and Systems},
-    address  = {Delft, Netherlands},
-    year = {2024},
-}
-```
+MIT, inherited from upstream Octo (see `LICENSE`).
