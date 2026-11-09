@@ -1,6 +1,6 @@
 # octo_teleoperation
 
-Finetunes the Octo generalist robot policy to predict an action covariance. That covariance becomes a mapping from a 2-DOF joystick to a 14-DOF arm. It's research code for assistive teleoperation.
+Finetunes the Octo generalist robot policy to predict an action covariance. That covariance becomes a mapping from a 2-DOF joystick to a 14-dim bimanual robot (ALOHA). It's research code for assistive teleoperation.
 
 Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), with Michael Przystupa and Matthew E. Taylor, University of Alberta.
 
@@ -80,7 +80,7 @@ flowchart LR
   F --> G["robot action = W · joystick input"]
 ```
 
-Octo's tokenizers and transformer stay as they are. Only the output head changes. The head predicts a zero-mean Gaussian over actions. Training minimizes the negative log-likelihood of the expert action chunk under `N(0, Σ)`. The top-k eigenvectors of Σ, scaled by √λ, become the joystick-to-robot mapping. The eigenvectors set the directions and the eigenvalues set the gains.
+The new head predicts a zero-mean Gaussian over actions. Training minimizes the negative log-likelihood of the expert action chunk under `N(0, Σ)`. The top-k eigenvectors of Σ, scaled by √λ, become the joystick-to-robot mapping. The eigenvectors set the directions and the eigenvalues set the gains.
 
 <img src="docs/media/teleop_finetune_loss.jpg" width="480" alt="teleop head finetuning loss">
 
