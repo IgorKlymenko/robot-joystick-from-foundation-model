@@ -24,35 +24,43 @@ This is a fork of [Octo](https://github.com/octo-models/octo). Everything not li
 - `scripts/teleop_finetune.py`: replaces the action head on a pretrained Octo model and finetunes it
 - `scripts/multi_horizon_finetune.py`, `multi_horizon_predict.py`, `run_multi_horizon_experiment.py`: train at several action horizons and cross-evaluate every train/predict pair
 - `scripts/visualize_trajectories.py`: predicted-vs-ground-truth plots
-- `notebooks/`: the Colab notebook that produced the report's results
+- `notebooks/experiments_Octo_Teleoperation.ipynb`: the Colab notebook that ran the report's experiments with these scripts
 - `scripts/MULTI_HORIZON_README.md`: full flag reference
 
 ## Run it locally
 
-Python 3.10. Training needs a GPU.
+Python 3.10, CUDA 12 GPU. These are the steps from [the Colab notebook](notebooks/experiments_Octo_Teleoperation.ipynb), including the version pins it needed.
 
 ```bash
 conda create -n octo python=3.10 && conda activate octo
 pip install -e .
 pip install -r requirements.txt
-pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install --upgrade "jax[cuda12_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install scipy==1.11.4 "numpy<2" nvidia-cudnn-cu12==8.9.4.25
 
 # smoke test the head (no data needed)
 python scripts/teleoperationUnitTest.py
 
-# simulated ALOHA cube-handover data
-wget https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip && unzip example_sim_data.zip
+# simulated ALOHA cube-handover data -> data/aloha_sim_dataset
+wget -P data/ https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip
+unzip data/example_sim_data.zip -d data/
 
-# finetune at horizons 1/5/15, then evaluate all 9 pairs (settings from the report)
-python scripts/run_multi_horizon_experiment.py \
+# finetune one model per horizon
+python scripts/multi_horizon_finetune.py \
   --pretrained_path=hf://rail-berkeley/octo-small-1.5 \
-  --data_dir=./example_sim_data \
-  --base_save_dir=./checkpoints/multi_horizon \
-  --output_dir=./results/multi_horizon \
-  --action_horizons=1,5,15 --num_steps=2000 --num_trajectories=3
+  --data_dir=data/aloha_sim_dataset --base_save_dir=models \
+  --action_horizons=15,5,1 --num_steps=2000 --batch_size=32
+
+# evaluate all 9 train/predict pairs, then plot
+python scripts/multi_horizon_predict.py \
+  --base_model_dir=models --data_dir=data/aloha_sim_dataset \
+  --training_horizons=1,5,15 --prediction_horizons=1,5,15 \
+  --num_trajectories=3 --n_cov_samples=128 --batch_size=64 \
+  --output_dir=experiments
+python scripts/visualize_trajectories.py --results_dir=experiments --output_dir=plots
 ```
 
-There are no env vars. Everything is set with absl flags.
+There are no env vars. Everything is set with absl flags. On Colab the notebook also points `LD_LIBRARY_PATH` at the pip-installed cuDNN.
 
 ## How it works
 
@@ -101,7 +109,7 @@ Python, JAX/Flax, TensorFlow Probability (JAX substrate), Optax, TF/RLDS data pi
 ## Status
 
 - Simulation only (ALOHA sim). No user study or real-robot run yet. That's the next step in the report.
-- The report's numbers come from the notebook in `notebooks/`. The scripts are the cleaned-up version and haven't been re-run end to end.
+- Experiments ran on Colab through the notebook. `run_multi_horizon_experiment.py` is an untested wrapper. Use the two scripts directly.
 - `teleop_finetune.py` hardcodes the dataset and step count. Use the multi-horizon scripts instead.
 
 ## License
