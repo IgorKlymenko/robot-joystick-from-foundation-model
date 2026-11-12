@@ -78,7 +78,7 @@ JAX/Flax, TensorFlow Probability on the JAX substrate, Optax, Octo's TF/RLDS dat
 
 ## where it stands
 
-Simulation only, on ALOHA sim. No user study or real robot yet; the report lists a user study as the next step. Every experiment ran on Colab through the notebook. `run_multi_horizon_experiment.py` wraps the two scripts but I never ran it, and `teleop_finetune.py` hardcodes the dataset, horizon 50 and 1000 steps, so use the multi-horizon scripts.
+Simulation only, on ALOHA sim. No user study or real robot yet. Every experiment ran on Colab through the notebook. `run_multi_horizon_experiment.py` wraps the two scripts but I never ran it, and `teleop_finetune.py` hardcodes the dataset, horizon 50 and 1000 steps, so use the multi-horizon scripts.
 
 ## license
 
