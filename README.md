@@ -1,117 +1,81 @@
 # Video Language Teleoperation Models
 
-Finetunes the Octo generalist robot policy to predict an action covariance. That covariance becomes a mapping from a 2-DOF joystick to a 14-dim bimanual robot (ALOHA). It's research code for assistive teleoperation.
+A 2-DOF joystick can't drive a 14-DOF robot on its own. This finetunes Octo to predict an action covariance, and the covariance becomes the mapping.
 
-Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), with Michael Przystupa and Matthew E. Taylor, University of Alberta.
+Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), with Michael Przystupa and Matthew E. Taylor. Research project at the University of Alberta.
 
 <p>
   <img src="docs/media/bridge_episode_stove.gif" width="200">
   <img src="docs/media/bridge_episode_table.gif" width="200">
   <img src="docs/media/bridge_episode_counter.gif" width="200">
 </p>
+<sub>Bridge episodes from Octo's example data. I ran the pretrained model on these before swapping out its action head.</sub>
 
-<sub>Bridge episodes from Octo's example data, which I used to sanity-check the pretrained model before replacing its action head.</sub>
+- The new head predicts a zero-mean Gaussian over actions and nothing else.
+- The top-2 eigenvectors of that covariance are the joystick mapping.
+- Trained at horizon 5, the mapping reconstructs expert actions with MSE 0.113, about 3× better than horizons 1 or 15.
 
-## Why I built this
+## why a covariance instead of an action
 
-Assistive teleoperation maps a 2D or 3D joystick onto a high-DOF robot. Existing systems learn that mapping per task, and collecting data for each task is expensive. I wanted to check whether a pretrained generalist policy could produce the mapping once from the scene and the instruction, so the controller doesn't need task-specific action labels.
+Assistive teleoperation maps a 2D or 3D joystick onto a high-DOF arm. The usual way is to learn that mapping per task, and collecting data for every task is expensive. I think a pretrained generalist policy already knows enough about the scene to hand you the mapping once, from the first image and the instruction, so you never need task-specific action labels. A covariance is a cheap way to ask for it: the eigenvectors say which directions matter here and the eigenvalues say how much.
 
-## What I changed vs. upstream
+## what's mine
 
-This is a fork of [Octo](https://github.com/octo-models/octo). Everything not listed here is upstream code (original README in `README.upstream.md`).
+This is a fork of [Octo](https://github.com/octo-models/octo); the upstream README is in `README.upstream.md`. The new code is `TeleoperationActionHead` at the bottom of `octo/model/components/action_heads.py` (last ~280 lines), the pair `scripts/multi_horizon_finetune.py` and `scripts/multi_horizon_predict.py` that train one model per horizon and score every train/predict pair, and the Colab notebook in `notebooks/` that produced the report. Every flag is listed in `scripts/MULTI_HORIZON_README.md`.
 
-- `octo/model/components/action_heads.py`: `TeleoperationActionHead` (the last ~290 lines)
-- `scripts/teleop_finetune.py`: replaces the action head on a pretrained Octo model and finetunes it
-- `scripts/multi_horizon_finetune.py`, `multi_horizon_predict.py`, `run_multi_horizon_experiment.py`: train at several action horizons and cross-evaluate every train/predict pair
-- `scripts/visualize_trajectories.py`: predicted-vs-ground-truth plots
-- `notebooks/experiments_Octo_Teleoperation.ipynb`: the Colab notebook that ran the report's experiments with these scripts
-- `scripts/MULTI_HORIZON_README.md`: full flag reference
+## run it
 
-## Run it locally
-
-Python 3.10, CUDA 12 GPU. These are the steps from [the Colab notebook](notebooks/experiments_Octo_Teleoperation.ipynb), including the version pins it needed.
+Python 3.10 and a CUDA 12 GPU. The pins are the ones the notebook needed.
 
 ```bash
-conda create -n octo python=3.10 && conda activate octo
-pip install -e .
-pip install -r requirements.txt
-pip install --upgrade "jax[cuda12_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install scipy==1.11.4 "numpy<2" nvidia-cudnn-cu12==8.9.4.25
+uv venv --python 3.10 && source .venv/bin/activate
+uv pip install -e . -r requirements.txt
+uv pip install --upgrade "jax[cuda12_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv pip install scipy==1.11.4 "numpy<2" nvidia-cudnn-cu12==8.9.4.25
 
-# smoke test the head (no data needed)
-python scripts/smoke_test_teleop_head.py
+python scripts/smoke_test_teleop_head.py   # forward pass on dummy tokens, no data needed
 
-# simulated ALOHA cube-handover data -> data/aloha_sim_dataset
-wget -P data/ https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip
-unzip data/example_sim_data.zip -d data/
+wget -P data/ https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip && unzip data/example_sim_data.zip -d data/
 
-# finetune one model per horizon
-python scripts/multi_horizon_finetune.py \
-  --pretrained_path=hf://rail-berkeley/octo-small-1.5 \
-  --data_dir=data/aloha_sim_dataset --base_save_dir=models \
-  --action_horizons=15,5,1 --num_steps=2000 --batch_size=32
-
-# evaluate all 9 train/predict pairs, then plot
-python scripts/multi_horizon_predict.py \
-  --base_model_dir=models --data_dir=data/aloha_sim_dataset \
-  --training_horizons=1,5,15 --prediction_horizons=1,5,15 \
-  --num_trajectories=3 --n_cov_samples=128 --batch_size=64 \
-  --output_dir=experiments
+python scripts/multi_horizon_finetune.py --pretrained_path=hf://rail-berkeley/octo-small-1.5 \
+  --data_dir=data/aloha_sim_dataset --base_save_dir=models --action_horizons=15,5,1 --num_steps=2000 --batch_size=32
+python scripts/multi_horizon_predict.py --base_model_dir=models --data_dir=data/aloha_sim_dataset \
+  --training_horizons=1,5,15 --prediction_horizons=1,5,15 --num_trajectories=3 --n_cov_samples=128 --batch_size=64 --output_dir=experiments
 python scripts/visualize_trajectories.py --results_dir=experiments --output_dir=plots
 ```
 
-There are no env vars. Everything is set with absl flags. On Colab the notebook also points `LD_LIBRARY_PATH` at the pip-installed cuDNN.
+The cuDNN pin is there because JAX on Colab would not see the GPU until I matched cuDNN 8.9 by hand and pointed `LD_LIBRARY_PATH` at the pip-installed copy. The notebook does that part for you. Everything else is an absl flag; there are no env vars.
 
-## How it works
+## how the head works
 
-Out of the box, Octo predicts the next action directly. Here's the pretrained model zero-shot on a Bridge episode (blue: predicted, orange: ground truth):
+Octo's transformer stays. After MAP pooling over the readout tokens, one Dense layer emits 105 numbers, the lower triangle of a 14×14 matrix L, and Σ = L·Lᵀ + 1e-3·I. The loss is the negative log-likelihood of the expert action chunk under N(0, Σ). At eval time `multi_horizon_predict.py` draws 128 samples per timestep, takes the top-2 eigenvectors of their covariance, scales each by √λ, and that 14×2 matrix is the joystick map.
 
-![pretrained Octo zero-shot on Bridge](docs/media/octo_zeroshot_bridge_stove.jpg)
+<img src="docs/media/teleop_finetune_loss.jpg" width="480">
+<sub>NLL over a 1000-step finetune on ALOHA sim with `teleop_finetune.py`.</sub>
 
-I keep the transformer and replace that output:
+## the problem: there is nothing to score
 
-```mermaid
-flowchart LR
-  A[image + proprio + instruction] --> B[pretrained Octo transformer]
-  B --> C[MAP pooling over readout tokens]
-  C --> D["Dense → lower-triangular L"]
-  D --> E["Σ = L·Lᵀ + εI"]
-  E --> F["top-k eigenvectors: W = U_k·Λ_k^½ (14×2)"]
-  F --> G["robot action = W · joystick input"]
-```
+With a zero mean, MSE against ground truth tells you nothing. The samples scatter around zero by design:
 
-The new head predicts a zero-mean Gaussian over actions. Training minimizes the negative log-likelihood of the expert action chunk under `N(0, Σ)`. The top-k eigenvectors of Σ, scaled by √λ, become the joystick-to-robot mapping. The eigenvectors set the directions and the eigenvalues set the gains.
+<img src="docs/media/traj_train_h5_pred_h5_segment3.jpg" width="360">
+<sub>Samples (orange) vs ground truth (blue). First 7 of 14 action dims, 160-step segment, trained and evaluated at horizon 5.</sub>
 
-<img src="docs/media/teleop_finetune_loss.jpg" width="480" alt="teleop head finetuning loss">
+So the predict script builds the rank-2 basis B from the sampled covariance and solves min_z ‖a* − Bz‖² for each expert action. Reconstruction error answers the question that matters: could a 2-DOF joystick have produced what the expert did?
 
-<sub>NLL during a 1000-step finetune of the head on ALOHA sim (`teleop_finetune.py`).</sub>
-
-## The hard part
-
-**Predicting a control mapping instead of an action, and then showing it works.**
-
-*Parameterization.* The first version predicted a separate Σ for every step in the chunk. That's H × 105 outputs for 14-dim actions, or 5,250 at horizon 50, and it gives you a mapping that keeps shifting under the user's hand. In `03c4c8c` I switched to one Cholesky factor per timestep, shared across the horizon. That's 105 outputs, and `L·Lᵀ + εI` keeps Σ positive-definite without optimizer constraints. The tradeoff: the model can't express uncertainty that grows later in the chunk. In return the operator gets a mapping that holds steady.
-
-*Evaluation.* With a zero mean there's no prediction to score, so MSE tells you nothing. `multi_horizon_predict.py` draws 128 samples per timestep, builds the rank-2 basis B from their covariance, and solves `min_z ‖a* − Bz‖²` for each expert action. Reconstruction error answers one question: could a 2-DOF joystick have produced the action the expert took?
-
-<img src="docs/media/traj_train_h5_pred_h5_segment3.jpg" width="360" alt="sampled actions vs ground truth">
-
-<sub>Samples from the head (orange) scatter around zero by design, so they don't track the ground truth (blue). That's why scoring them with MSE doesn't work. First 7 of 14 action dims, train/predict horizon 5.</sub>
-
-Result: on held-out trajectories, training at horizon 5 gave the best mapping at every evaluation horizon (MSE 0.113 at horizon 15). That's about 3× lower than training at horizon 1 or 15. Horizon 1 doesn't capture the task's temporal structure, and horizon 15 overfits.
+The first version of the head also predicted a separate Σ for every step in the chunk. That is H × 105 outputs, 5,250 at horizon 50, and a mapping that would drift under the operator's hand. Commit `03c4c8c` made it one Σ shared across the horizon. It can no longer express uncertainty that grows later in the chunk, but the mapping holds still.
 
 ![reconstruction error](docs/recon_heatmap.png)
 
-## Stack
+On 3 held-out trajectories, training at horizon 5 wins at every evaluation horizon. At evaluation horizon 15 it scores 0.113 against 0.397 (trained at 1) and 0.349 (trained at 15). Horizon 1 misses the temporal structure. Horizon 15 overfits.
 
-Python, JAX/Flax, TensorFlow Probability (JAX substrate), Optax, TF/RLDS data pipeline (from Octo), matplotlib.
+## stack
 
-## Status
+JAX/Flax, TensorFlow Probability on the JAX substrate, Optax, Octo's TF/RLDS data pipeline, matplotlib.
 
-- Simulation only (ALOHA sim). No user study or real-robot run yet. That's the next step in the report.
-- Experiments ran on Colab through the notebook. `run_multi_horizon_experiment.py` is an untested wrapper. Use the two scripts directly.
-- `teleop_finetune.py` hardcodes the dataset and step count. Use the multi-horizon scripts instead.
+## where it stands
 
-## License
+Simulation only, on ALOHA sim. No user study or real robot yet; the report lists a user study as the next step. Every experiment ran on Colab through the notebook. `run_multi_horizon_experiment.py` wraps the two scripts but I never ran it, and `teleop_finetune.py` hardcodes the dataset, horizon 50 and 1000 steps, so use the multi-horizon scripts.
 
-MIT, inherited from upstream Octo (see `LICENSE`).
+## license
+
+MIT, inherited from Octo. See `LICENSE`.
