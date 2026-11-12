@@ -2,13 +2,15 @@
 
 A 2-DOF joystick can't drive a 14-DOF robot on its own. This finetunes Octo to predict an action covariance, and the covariance becomes the mapping.
 
-Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), with Michael Przystupa and Matthew E. Taylor. Research project at the University of Alberta.
+Write-up: [Video Language Teleoperation Models (PDF)](docs/OctoTeleop_Report.pdf), <br>
+with Michael Przystupa and Matthew E. Taylor. Research project at the University of Alberta.
 
 <p>
   <img src="docs/media/bridge_episode_stove.gif" width="200">
   <img src="docs/media/bridge_episode_table.gif" width="200">
   <img src="docs/media/bridge_episode_counter.gif" width="200">
 </p>
+
 <sub>Bridge episodes from Octo's example data. I ran the pretrained model on these before swapping out its action head.</sub>
 
 - The new head predicts a zero-mean Gaussian over actions and nothing else.
@@ -51,6 +53,7 @@ The cuDNN pin is there because JAX on Colab would not see the GPU until I matche
 Octo's transformer stays. After MAP pooling over the readout tokens, one Dense layer emits 105 numbers, the lower triangle of a 14×14 matrix L, and Σ = L·Lᵀ + 1e-3·I. The loss is the negative log-likelihood of the expert action chunk under N(0, Σ). At eval time `multi_horizon_predict.py` draws 128 samples per timestep, takes the top-2 eigenvectors of their covariance, scales each by √λ, and that 14×2 matrix is the joystick map.
 
 <img src="docs/media/teleop_finetune_loss.jpg" width="480">
+
 <sub>NLL over a 1000-step finetune on ALOHA sim with `teleop_finetune.py`.</sub>
 
 ## the problem: there is nothing to score
@@ -58,6 +61,7 @@ Octo's transformer stays. After MAP pooling over the readout tokens, one Dense l
 With a zero mean, MSE against ground truth tells you nothing. The samples scatter around zero by design:
 
 <img src="docs/media/traj_train_h5_pred_h5_segment3.jpg" width="360">
+
 <sub>Samples (orange) vs ground truth (blue). First 7 of 14 action dims, 160-step segment, trained and evaluated at horizon 5.</sub>
 
 So the predict script builds the rank-2 basis B from the sampled covariance and solves min_z ‖a* − Bz‖² for each expert action. Reconstruction error answers the question that matters: could a 2-DOF joystick have produced what the expert did?
